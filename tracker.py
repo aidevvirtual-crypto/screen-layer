@@ -1,7 +1,7 @@
 """Camera tracker: finds ArUco markers shown on device screens and maps them to table coordinates (cm).
 
-Table calibration markers (print them, see /markers): id 0=top-left, 1=top-right, 2=bottom-right, 3=bottom-left.
-The table size given on the command line is the distance between those marker CENTERS.
+Table calibration: in the control panel the user clicks the 4 corners of the table area on the camera
+preview (top-left, top-right, bottom-right, bottom-left) and enters its size in cm. No printed markers.
 Device markers start at id 10 and are drawn centered and upright on each screen.
 """
 import math
@@ -12,7 +12,6 @@ import cv2
 import numpy as np
 
 DICT = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
-TABLE_IDS = (0, 1, 2, 3)
 
 
 def marker_png(marker_id, size=400):
@@ -26,13 +25,29 @@ class Tracker(threading.Thread):
         self.source = int(source) if str(source).isdigit() else source
         self.table_w, self.table_h = table_w, table_h
         self.on_detect = on_detect  # called from this thread with list of detections
-        self.H = None               # image px -> table cm
-        self.table_locked = False   # True once the 4 table markers were seen
+        self.corners = None         # 4 clicked table corners, normalized 0..1 in camera image (TL,TR,BR,BL)
         self.jpeg = None
         self.lock = threading.Lock()
         params = cv2.aruco.DetectorParameters()
         params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
         self.detector = cv2.aruco.ArucoDetector(DICT, params)
+
+    def set_calibration(self, corners, table_w, table_h):
+        self.corners = [list(map(float, c)) for c in corners] if corners else None
+        self.table_w, self.table_h = table_w, table_h
+
+    @property
+    def calibrated(self):
+        return self.corners is not None
+
+    def homography(self, fw, fh):
+        """image px -> table cm"""
+        if self.corners:
+            src = np.float32([[x * fw, y * fh] for x, y in self.corners])
+            dst = np.float32([[0, 0], [self.table_w, 0], [self.table_w, self.table_h], [0, self.table_h]])
+            return cv2.getPerspectiveTransform(src, dst)
+        s = self.table_w / fw  # not calibrated: whole camera frame == table width, no perspective correction
+        return np.float64([[s, 0, 0], [0, s, 0], [0, 0, 1]])
 
     def run(self):
         while True:
@@ -56,21 +71,12 @@ class Tracker(threading.Thread):
         corners, ids, _ = self.detector.detectMarkers(gray)
         found = {} if ids is None else {int(i): c.reshape(4, 2) for i, c in zip(ids.flatten(), corners)}
 
-        # Table homography from the 4 corner markers (cached once seen).
-        if all(i in found for i in TABLE_IDS):
-            src = np.float32([found[i].mean(axis=0) for i in TABLE_IDS])
-            dst = np.float32([[0, 0], [self.table_w, 0], [self.table_w, self.table_h], [0, self.table_h]])
-            self.H = cv2.getPerspectiveTransform(src, dst)
-            self.table_locked = True
-        if self.H is None:  # fallback: whole camera frame == table width, no perspective correction
-            s = self.table_w / frame.shape[1]
-            self.H = np.float64([[s, 0, 0], [0, s, 0], [0, 0, 1]])
+        fh, fw = frame.shape[:2]
+        H = self.homography(fw, fh)
 
         dets = []
         for mid, c in found.items():
-            if mid in TABLE_IDS:
-                continue
-            t = cv2.perspectiveTransform(c.reshape(-1, 1, 2).astype(np.float64), self.H).reshape(4, 2)
+            t = cv2.perspectiveTransform(c.reshape(-1, 1, 2).astype(np.float64), H).reshape(4, 2)
             center = t.mean(axis=0)
             vx, vy = t[1] - t[0]  # marker top edge (TL->TR) == screen +x axis
             side = float(np.mean([np.linalg.norm(t[k] - t[(k + 1) % 4]) for k in range(4)]))
@@ -82,8 +88,9 @@ class Tracker(threading.Thread):
         # Debug preview
         if ids is not None:
             cv2.aruco.drawDetectedMarkers(frame, corners, ids)
-        label = "table: calibrated" if self.table_locked else "table: NOT calibrated (show markers 0-3)"
-        cv2.putText(frame, label, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+        if self.corners:
+            pts = np.int32([[x * fw, y * fh] for x, y in self.corners])
+            cv2.polylines(frame, [pts], True, (0, 255, 0), max(2, fw // 400))
         small = cv2.resize(frame, (640, int(640 * frame.shape[0] / frame.shape[1])))
         with self.lock:
             self.jpeg = cv2.imencode(".jpg", small, [cv2.IMWRITE_JPEG_QUALITY, 70])[1].tobytes()

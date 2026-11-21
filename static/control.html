@@ -17,7 +17,11 @@
   button.sec { background: #2c333d; }
   input[type=range] { width: 100%; }
   .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-  #cam { width: 100%; border-radius: 6px; display: none; }
+  #camwrap { position: relative; display: none; }
+  #cam { width: 100%; display: block; border-radius: 6px; }
+  #camwrap.picking #cam { cursor: crosshair; outline: 2px solid var(--acc); }
+  #camsvg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  input[type=number] { width: 64px; background: #2c333d; color: var(--fg); border: 0; border-radius: 6px; padding: 6px; }
   .mut { color: var(--mut); font-size: 12px; }
   a { color: #7fa8ff; }
   @media (max-width: 720px) { body { flex-direction: column; } aside { width: 100%; } #stage { height: 60vh; flex: none; } }
@@ -44,10 +48,17 @@
     <div class="mut">Geser perangkat atau video di kanvas. Scroll atau tombol Q/E untuk memutar.</div>
   </section>
   <section>
-    <h3>Tracking</h3>
-    <div id="trk" class="mut"></div>
-    <img id="cam" alt="camera">
-    <div class="mut"><a href="/markers" target="_blank">Cetak marker meja (ID 0–3)</a></div>
+    <h3>Meja &amp; kamera</h3>
+    <div class="row">
+      <label>Lebar <input id="tw" type="number" min="1" step="0.5"> cm</label>
+      <label>Tinggi <input id="th" type="number" min="1" step="0.5"> cm</label>
+    </div>
+    <div id="trk" class="mut" style="margin:8px 0"></div>
+    <div id="camwrap"><img id="cam" alt="camera"><svg id="camsvg" viewBox="0 0 1 1" preserveAspectRatio="none"></svg></div>
+    <div id="calrow" class="row" style="display:none;margin-top:8px">
+      <button id="calib">Kalibrasi meja</button><button id="calreset" class="sec">Reset</button>
+    </div>
+    <div id="calhint" class="mut" style="margin-top:6px"></div>
   </section>
 </aside>
 <video id="v" src="/video" playsinline muted loop preload="auto" style="display:none"></video>
@@ -84,9 +95,14 @@ function updatePanel() {
   $('grid').checked = S.grid;
   const n = Object.keys(S.devices).length;
   $('trk').textContent = S.tracking
-    ? `Kamera aktif · meja ${S.calibrated ? 'terkalibrasi ✓' : 'BELUM terkalibrasi (tampilkan marker 0–3)'} · ${n} layar`
+    ? `Kamera aktif · meja ${S.calibrated ? 'terkalibrasi ✓' : 'BELUM terkalibrasi (tekan "Kalibrasi meja")'} · ${n} layar`
     : `Mode manual (tanpa kamera) · ${n} layar terhubung`;
-  if (S.tracking && $('cam').style.display !== 'block') { $('cam').src = '/cam.mjpg'; $('cam').style.display = 'block'; }
+  if (S.tracking && $('camwrap').style.display !== 'block') {
+    $('cam').src = '/cam.mjpg'; $('camwrap').style.display = 'block'; $('calrow').style.display = 'flex';
+  }
+  if (document.activeElement !== $('tw')) $('tw').value = S.table.w;
+  if (document.activeElement !== $('th')) $('th').value = S.table.h;
+  drawCorners();
   const d = selObj();
   $('selname').textContent = !sel ? '–' : sel === 'content' ? 'video' : 'layar #' + sel;
   if (d && document.activeElement !== $('sa')) $('sa').value = (sel === 'content' ? d.a : d.a) * 180 / Math.PI;
@@ -96,6 +112,35 @@ setInterval(() => {
   $('time').textContent = `${fmt(video.currentTime)} / ${fmt(video.duration)}`;
   if (document.activeElement !== $('seek')) $('seek').value = video.currentTime;
 }, 250);
+
+// --- table calibration: click the 4 corners of the table area on the camera preview ---
+const CORNER_NAMES = ['kiri-atas', 'kanan-atas', 'kanan-bawah', 'kiri-bawah'];
+let picking = null; // array of clicked points while calibrating
+const tableSize = () => ({ w: parseFloat($('tw').value), h: parseFloat($('th').value) });
+function sendTable() { const z = tableSize(); if (z.w > 0 && z.h > 0) SL.send({ t: 'calibrate', ...z }); }
+$('tw').onchange = sendTable; $('th').onchange = sendTable;
+$('calib').onclick = () => {
+  picking = []; $('camwrap').classList.add('picking');
+  $('calhint').textContent = `Klik sudut 1/4 area meja di gambar kamera: ${CORNER_NAMES[0]}`; drawCorners();
+};
+$('calreset').onclick = () => { picking = null; $('camwrap').classList.remove('picking'); $('calhint').textContent = ''; SL.send({ t: 'calibrate', corners: null }); };
+$('cam').onclick = e => {
+  if (!picking) return;
+  const r = $('cam').getBoundingClientRect();
+  picking.push([(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height]);
+  if (picking.length < 4) { $('calhint').textContent = `Klik sudut ${picking.length + 1}/4: ${CORNER_NAMES[picking.length]}`; drawCorners(); return; }
+  SL.send({ t: 'calibrate', corners: picking, ...tableSize() });
+  picking = null; $('camwrap').classList.remove('picking');
+  $('calhint').textContent = 'Tersimpan ✓ — nyalakan "Grid kalibrasi" untuk mengecek.';
+};
+function drawCorners() {
+  const pts = picking || (SL.state && SL.state.corners) || [];
+  const col = picking ? '#3a7bff' : '#3ddc84';
+  let h = '';
+  if (pts.length > 1) h += `<polyline points="${pts.map(p => p.join(',')).join(' ')}${pts.length === 4 ? ' ' + pts[0].join(',') : ''}" fill="none" stroke="${col}" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
+  pts.forEach(p => { h += `<ellipse cx="${p[0]}" cy="${p[1]}" rx=".012" ry=".02" fill="${col}"/>`; });
+  $('camsvg').innerHTML = h;
+}
 
 function selObj() {
   const S = SL.state; if (!S || !sel) return null;

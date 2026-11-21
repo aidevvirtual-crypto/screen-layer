@@ -1,6 +1,6 @@
 """Screen Layer server: one video spread across many screens lying on a table.
 
-Run:  python3 server.py --video VID.mp4 [--camera 0 | --camera http://phone-ip:8080/video] [--table 60x40] [--https]
+Run:  python3 server.py --video VID.mp4 [--camera 0 | --camera http://phone-ip:8080/video] [--https]
 Open: http://<this-ip>:8000/          on every phone/tablet (screen)
       http://<this-ip>:8000/control   on the laptop (control panel)
 """
@@ -19,6 +19,7 @@ from aiohttp import web, WSMsgType
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATIC = os.path.join(HERE, "static")
+CALIB_FILE = os.path.join(HERE, "calib.json")
 DEFAULT_CM_PER_PX = 0.017  # rough phone guess until camera or manual calibration
 SMOOTH = 0.5               # EMA factor for tracked poses
 
@@ -30,8 +31,12 @@ def now_ms():
 class App:
     def __init__(self, args):
         self.args = args
-        tw, th = (float(v) for v in args.table.lower().split("x"))
-        self.table = {"w": tw, "h": th}
+        self.calib = load_calib()  # {"table": {"w","h"}, "corners": [[x,y]*4] | None}
+        if args.table:
+            w, h = (float(v) for v in args.table.lower().split("x"))
+            self.calib["table"] = {"w": w, "h": h}
+        self.table = self.calib["table"]
+        tw, th = self.table["w"], self.table["h"]
         self.devices = {}      # id -> device dict
         self.key_to_id = {}    # persistent browser key -> marker id
         self.next_id = 10
@@ -52,7 +57,8 @@ class App:
             "playback": self.playback,
             "grid": self.grid,
             "tracking": self.tracker is not None,
-            "calibrated": bool(self.tracker and self.tracker.table_locked),
+            "calibrated": bool(self.calib.get("corners")),
+            "corners": self.calib.get("corners"),
         }
 
     def current_pos(self):
@@ -162,6 +168,15 @@ class App:
             self.playback = {"playing": False, "pos": self.current_pos(), "at": now_ms()}
         elif t == "seek":
             self.playback = {"playing": self.playback["playing"], "pos": float(m["pos"]), "at": now_ms() + 300}
+        elif t == "calibrate":  # control panel: 4 clicked corners (normalized) and/or table size in cm
+            if "w" in m and "h" in m and float(m["w"]) > 0 and float(m["h"]) > 0:
+                self.table.update(w=float(m["w"]), h=float(m["h"]))
+            if "corners" in m:
+                c = m["corners"]
+                self.calib["corners"] = c if c and len(c) == 4 else None
+            if self.tracker:
+                self.tracker.set_calibration(self.calib.get("corners"), self.table["w"], self.table["h"])
+            save_calib(self.calib)
         elif t == "grid":
             self.grid = bool(m["on"])
         else:
@@ -200,7 +215,22 @@ class App:
             loop = asyncio.get_running_loop()
             self.tracker = Tracker(self.args.camera, self.table["w"], self.table["h"],
                                    lambda dets: loop.call_soon_threadsafe(self.apply_detections, dets))
+            self.tracker.set_calibration(self.calib.get("corners"), self.table["w"], self.table["h"])
             self.tracker.start()
+
+
+def load_calib():
+    try:
+        with open(CALIB_FILE) as f:
+            c = json.load(f)
+        return {"table": {"w": float(c["table"]["w"]), "h": float(c["table"]["h"])}, "corners": c.get("corners")}
+    except (OSError, ValueError, KeyError, TypeError):
+        return {"table": {"w": 60.0, "h": 40.0}, "corners": None}
+
+
+def save_calib(calib):
+    with open(CALIB_FILE, "w") as f:
+        json.dump(calib, f, indent=2)
 
 
 def lan_ip():
@@ -231,7 +261,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--video", help="video file to play (default: first *.mp4 here)")
     ap.add_argument("--camera", help="camera index (0) or stream URL; omit for manual mode")
-    ap.add_argument("--table", default="60x40", help="table area WxH in cm (between table marker centers)")
+    ap.add_argument("--table", help="table area WxH in cm, e.g. 60x40 (normally set in the control panel)")
     ap.add_argument("--port", type=int, default=8000)
     ap.add_argument("--https", action="store_true", help="self-signed HTTPS (needed for motion sensor / wake lock)")
     args = ap.parse_args()
@@ -245,7 +275,6 @@ def main():
     app = web.Application()
     app.router.add_get("/", lambda r: a.page(r, "screen.html"))
     app.router.add_get("/control", lambda r: a.page(r, "control.html"))
-    app.router.add_get("/markers", lambda r: a.page(r, "markers.html"))
     app.router.add_get("/ws", a.ws_handler)
     app.router.add_get("/video", a.video)
     app.router.add_get("/marker/{id}.png", a.marker)
@@ -256,7 +285,7 @@ def main():
     scheme = "https" if args.https else "http"
     base = f"{scheme}://{lan_ip()}:{args.port}"
     print(f"\n  video   : {args.video}\n  screens : {base}/\n  control : {base}/control"
-          f"\n  markers : {base}/markers\n  mode    : {'camera ' + str(args.camera) if args.camera else 'manual (no camera)'}\n")
+          f"\n  mode    : {'camera ' + str(args.camera) if args.camera else 'manual (no camera)'}\n")
     web.run_app(app, port=args.port, ssl_context=ssl_context() if args.https else None, print=None)
 
 

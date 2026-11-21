@@ -9,25 +9,25 @@ dilacak kamera lewat marker ArUco, atau diatur manual dari panel kontrol.
 ## Jalankan
 ```bash
 pip install -r requirements.txt
-python3 server.py --video VID-20261121-WA0001.mp4                         # mode manual (tanpa kamera)
-python3 server.py --camera 0 --table 60x40                                # webcam USB
-python3 server.py --camera http://IP-HP:8080/video --table 60x40 --https  # HP sebagai IP cam (app "IP Webcam")
+python3 server.py --video video.mp4                         # mode manual (tanpa kamera)
+python3 server.py --camera 0                                # webcam USB
+python3 server.py --camera http://IP-HP:8080/video --https  # HP sebagai IP cam (app "IP Webcam")
 ```
 Server menampilkan alamat yang perlu dibuka:
 - `http://IP:8000/` dibuka di setiap HP/tablet (semua harus di Wi-Fi yang sama), lalu tekan **Gabung**
-- `http://IP:8000/control` dibuka di laptop: play/pause, seek, posisi/ukuran/rotasi video, grid kalibrasi, preview kamera
-- `http://IP:8000/markers` untuk mencetak marker sudut meja (ID 0–3)
+- `http://IP:8000/control` dibuka di laptop: play/pause, seek, posisi/ukuran/rotasi video, grid kalibrasi, preview kamera, kalibrasi meja
 
 ## Kalibrasi kamera
 1. Kamera menghadap ke bawah, melihat seluruh area meja.
-2. Letakkan marker 0 (kiri-atas), 1 (kanan-atas), 2 (kanan-bawah), dan 3 (kiri-bawah). Ukur jarak antar titik tengahnya, lalu isi `--table LxT` (cm).
-   Setelah keempat marker terlihat sekali, kalibrasi tersimpan sampai server dimatikan, jadi marker boleh diambil lagi.
+2. Di panel kontrol, isi lebar dan tinggi area meja (cm), tekan **Kalibrasi meja**, lalu klik 4 sudut area meja
+   di preview kamera (kiri-atas, kanan-atas, kanan-bawah, kiri-bawah). Tidak perlu marker cetak.
+   Kalibrasi tersimpan di `calib.json`; ulangi hanya kalau kamera bergeser.
 3. Di tiap HP: ketuk dua kali untuk menampilkan marker. Kamera akan mengukur posisi, rotasi, **dan ukuran fisik layar** secara otomatis.
    Dengan `--https`, marker juga muncul otomatis saat HP digerakkan dan hilang 1,2 detik setelah HP diam.
 4. Nyalakan "Grid kalibrasi" di panel kontrol. Kalau garis diagonal tetap lurus melewati semua layar, berarti kalibrasi sudah pas.
 
 ## Cara kerja
-- `tracker.py`: OpenCV mendeteksi ArUco → homography kamera→meja (cm) → pose tiap layar `{x, y, sudut}` + cm/px.
+- `tracker.py`: OpenCV mendeteksi ArUco di layar HP → homography kamera→meja (cm, dari 4 sudut yang diklik) → pose tiap layar `{x, y, sudut}` + cm/px.
 - `server.py`: aiohttp; menyimpan state (pose, posisi video, jam playback) dan mengirimnya lewat WebSocket 30 Hz.
 - `static/screen.html`: menggambar video di canvas dengan transform `p = R(-a)·(T − C) / k`, jadi tiap layar otomatis menampilkan slice miliknya.
 - Sinkronisasi: setiap perangkat memutar file yang sama secara lokal, lalu dikunci ke jam server (sinkron jam ala NTP,

@@ -8,9 +8,9 @@ Panduan lengkap dari memasang webcam sampai membuka aplikasi di setiap HP/tablet
 1. [Yang dibutuhkan](#1-yang-dibutuhkan)
 2. [Install di laptop](#2-install-di-laptop)
 3. [Pasang kamera](#3-pasang-kamera)
-4. [Pasang marker di sudut meja](#4-pasang-marker-di-sudut-meja)
+4. [Ukur area meja](#4-ukur-area-meja)
 5. [Jalankan server](#5-jalankan-server)
-6. [Buka panel kontrol di laptop](#6-buka-panel-kontrol-di-laptop)
+6. [Buka panel kontrol dan kalibrasi meja](#6-buka-panel-kontrol-dan-kalibrasi-meja)
 7. [Buka app di setiap HP/tablet](#7-buka-app-di-setiap-hptablet)
 8. [Kalibrasi dan putar video](#8-kalibrasi-dan-putar-video)
 9. [Kalau ada masalah](#9-kalau-ada-masalah)
@@ -25,7 +25,7 @@ Panduan lengkap dari memasang webcam sampai membuka aplikasi di setiap HP/tablet
 | Kamera | Webcam USB atau HP bekas sebagai kamera. Harus bisa melihat seluruh meja dari atas. |
 | HP/tablet | Sebanyak yang mau dipakai. Browser Safari (iOS) atau Chrome (Android). |
 | Wi-Fi | **Semua perangkat harus di jaringan Wi-Fi yang sama.** Jangan pakai Wi-Fi tamu. |
-| Printer | Untuk mencetak 4 marker sudut meja. Kalau tidak ada printer, marker bisa ditampilkan di 4 HP lain. |
+| Meteran/penggaris | Untuk mengukur panjang dan lebar area meja. **Tidak perlu printer.** |
 
 ---
 
@@ -73,27 +73,24 @@ Pasang kamera **menghadap lurus ke bawah**, sekitar **60–100 cm** di atas meja
 
 ---
 
-## 4. Pasang marker di sudut meja
+## 4. Ukur area meja
 
-1. Jalankan server sebentar (lihat [langkah 5](#5-jalankan-server)), lalu buka `http://IP-LAPTOP:8000/markers` di laptop dan **cetak** halamannya.
-2. Gunting keempat marker, lalu letakkan **menghadap ke atas** di sudut area meja:
+Tentukan **area persegi panjang** di meja tempat HP/tablet akan diletakkan. Sudut-sudutnya harus **mudah terlihat di kamera**, misalnya:
+- tepi desk mat / alas meja (seperti alas hitam di video contoh),
+- tepi meja itu sendiri,
+- atau 4 potong **selotip/lakban** yang ditempel sebagai penanda sudut.
 
-   ```
-   ┌───────────────────────────┐
-   │ [0]                   [1] │   0 = kiri-atas
-   │                           │   1 = kanan-atas
-   │        area meja          │   2 = kanan-bawah
-   │                           │   3 = kiri-bawah
-   │ [3]                   [2] │
-   └───────────────────────────┘
-        (dilihat dari kamera)
-   ```
+Ukur **lebar** dan **tinggi** area itu dalam cm (contoh: 60 × 40 cm). Angka ini nanti diisi di panel kontrol.
 
-3. **Ukur jarak antar TITIK TENGAH marker** dalam cm:
-   - Lebar = jarak dari tengah marker 0 ke tengah marker 1
-   - Tinggi = jarak dari tengah marker 0 ke tengah marker 3
-
-   Contoh: lebar 60 cm dan tinggi 40 cm → `--table 60x40`
+```
+   kiri-atas ┌─────────────────────┐ kanan-atas
+             │                     │
+             │      area meja      │  ← tinggi (cm)
+             │                     │
+ kiri-bawah  └─────────────────────┘ kanan-bawah
+                   lebar (cm)
+              (dilihat dari kamera)
+```
 
 ---
 
@@ -101,10 +98,10 @@ Pasang kamera **menghadap lurus ke bawah**, sekitar **60–100 cm** di atas meja
 
 ```bash
 # webcam USB:
-python3 server.py --video video.mp4 --camera 0 --table 60x40 --https
+python3 server.py --video video.mp4 --camera 0 --https
 
 # HP Android sebagai kamera:
-python3 server.py --video video.mp4 --camera http://192.168.1.50:8080/video --table 60x40 --https
+python3 server.py --video video.mp4 --camera http://192.168.1.50:8080/video --https
 
 # tanpa kamera (posisi layar diatur manual dengan mouse):
 python3 server.py --video video.mp4
@@ -116,7 +113,6 @@ Server akan menampilkan alamatnya:
   video   : video.mp4
   screens : https://192.168.1.10:8000/
   control : https://192.168.1.10:8000/control
-  markers : https://192.168.1.10:8000/markers
   mode    : camera 0
 ```
 
@@ -126,7 +122,7 @@ Server akan menampilkan alamatnya:
 |---|---|---|
 | `--video` | File video yang diputar | file `*.mp4` pertama di folder |
 | `--camera` | Nomor kamera (`0`, `1`) atau URL stream | tanpa kamera (mode manual) |
-| `--table` | Ukuran area meja `LEBARxTINGGI` dalam cm | `60x40` |
+| `--table` | Ukuran area meja `LEBARxTINGGI` dalam cm (biasanya cukup diisi di panel kontrol) | `60x40` |
 | `--port` | Port server | `8000` |
 | `--https` | Pakai HTTPS (sertifikat self-signed dibuat otomatis) | mati |
 
@@ -140,13 +136,23 @@ Izinkan Python atau port 8000 supaya HP bisa terhubung ke laptop:
 
 ---
 
-## 6. Buka panel kontrol di laptop
+## 6. Buka panel kontrol dan kalibrasi meja
 
 1. Buka alamat **control** di browser laptop, misalnya `https://192.168.1.10:8000/control`.
 2. Kalau muncul peringatan sertifikat, pilih **Advanced → Proceed**.
-3. Di bagian **Tracking** akan terlihat preview kamera.
-4. Tunggu sampai muncul tulisan **"meja terkalibrasi ✓"**.
-5. Setelah itu keempat marker sudut **boleh diambil**, karena kalibrasinya tersimpan sampai server dimatikan. Kalau kamera bergeser, letakkan lagi markernya.
+3. Di bagian **Meja & kamera** akan terlihat preview kamera.
+4. Isi **Lebar** dan **Tinggi** area meja (cm) sesuai hasil ukur di [langkah 4](#4-ukur-area-meja).
+5. Tekan **Kalibrasi meja**, lalu **klik 4 sudut area meja langsung di gambar kamera**, dengan urutan:
+   1. kiri-atas
+   2. kanan-atas
+   3. kanan-bawah
+   4. kiri-bawah
+
+   Petunjuk sudut berikutnya muncul di bawah tombol. Setelah klik ke-4, akan muncul kotak hijau dan tulisan **"meja terkalibrasi ✓"**.
+6. Kalibrasi **tersimpan otomatis** di file `calib.json`, jadi tidak perlu diulang saat server dijalankan lagi.
+   Ulangi kalibrasi hanya kalau **kamera bergeser**. Tombol **Reset** menghapus kalibrasi.
+
+> Klik setepat mungkin di sudut area. Salah klik beberapa pixel hanya menggeser hasil sekitar 1–2 mm.
 
 ---
 
@@ -213,9 +219,10 @@ Kalau server dijalankan tanpa `--camera`:
 |---|---|
 | HP tidak bisa membuka alamat server | Pastikan Wi-Fi-nya sama, izinkan firewall, dan jangan pakai Wi-Fi tamu (biasanya antar perangkat diblokir) |
 | `cannot open camera` | Coba `--camera 1` atau `2`. Untuk IP Webcam, buka URL-nya di browser laptop dulu untuk memastikan kameranya jalan |
-| "Meja BELUM terkalibrasi" | Keempat marker 0–3 harus terlihat **bersamaan** di preview kamera |
+| "Meja BELUM terkalibrasi" | Tekan **Kalibrasi meja** lalu klik 4 sudut area meja di preview kamera |
 | Marker HP tidak terbaca | Naikkan kecerahan layar, kurangi pantulan lampu, atau dekatkan kamera |
-| Gambar antar layar tidak menyambung | Ulangi ketuk dua kali di HP itu, dan cek angka `--table` sudah sesuai jarak antar titik tengah marker |
+| Gambar antar layar tidak menyambung | Ulangi ketuk dua kali di HP itu, cek Lebar/Tinggi meja sudah benar, lalu ulangi **Kalibrasi meja** dengan klik yang lebih tepat |
+| Kamera tergeser | Ulangi **Kalibrasi meja** |
 | Ukuran potongan video tidak pas (tanpa kamera) | Isi lebar layar fisik (cm) lewat tombol ⚙ di HP |
 | Video tidak berputar di HP | Tekan **Gabung**, karena browser tidak mengizinkan video berputar otomatis tanpa sentuhan |
 | Marker tidak muncul otomatis saat HP digerakkan | Jalankan server dengan `--https`, dan izinkan akses Motion di iPhone |
