@@ -4,6 +4,8 @@ Satu video "ditempel" di permukaan meja. Setiap HP/tablet yang diletakkan di ata
 potongan video yang ada tepat di bawahnya (posisi, rotasi, dan skala ikut menyesuaikan). Posisi layar
 dilacak kamera lewat marker ArUco, atau diatur manual dari panel kontrol.
 
+> 📘 Panduan lengkap langkah demi langkah (setup webcam sampai membuka app di tiap perangkat): **[installment.md](installment.md)**
+
 ## Jalankan
 ```bash
 pip install -r requirements.txt
