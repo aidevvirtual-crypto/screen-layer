@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<title>Marker Meja</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 20px; }
+  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20mm; }
+  figure { margin: 0; text-align: center; }
+  img { width: 50mm; height: 50mm; image-rendering: pixelated; border: 8mm solid #fff; outline: 1px dashed #bbb; }
+  @media print { p { display: none; } }
+</style>
+</head>
+<body>
+<p>Cetak halaman ini, gunting, lalu letakkan di 4 sudut area meja: <b>0 = kiri-atas, 1 = kanan-atas, 2 = kanan-bawah, 3 = kiri-bawah</b>
+  (semua menghadap ke atas, seperti terlihat dari kamera). Ukur jarak <b>antar titik tengah</b> marker, lalu jalankan server dengan
+  <code>--table LEBARxTINGGI</code> dalam cm. Alternatif tanpa printer: tampilkan gambar <code>/marker/0.png</code> dst. di 4 HP lain.</p>
+<div class="grid">
+  <figure><img src="/marker/0.png"><figcaption>0 · kiri-atas</figcaption></figure>
+  <figure><img src="/marker/1.png"><figcaption>1 · kanan-atas</figcaption></figure>
+  <figure><img src="/marker/3.png"><figcaption>3 · kiri-bawah</figcaption></figure>
+  <figure><img src="/marker/2.png"><figcaption>2 · kanan-bawah</figcaption></figure>
+</div>
+</body>
+</html>

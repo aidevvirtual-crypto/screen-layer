@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Screen Layer – Kontrol</title>
+<style>
+  :root { --bg: #111418; --panel: #1b2027; --fg: #e8ecf1; --mut: #8a94a3; --acc: #3a7bff; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 14px system-ui, sans-serif; }
+  body { display: flex; }
+  #stage { flex: 1; position: relative; min-width: 0; }
+  canvas { width: 100%; height: 100%; display: block; touch-action: none; }
+  aside { width: 300px; background: var(--panel); padding: 16px; box-sizing: border-box; overflow: auto;
+          display: flex; flex-direction: column; gap: 14px; }
+  h3 { margin: 0 0 4px; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--mut); }
+  button { background: var(--acc); color: #fff; border: 0; border-radius: 8px; padding: 8px 14px; font-size: 14px; cursor: pointer; }
+  button.sec { background: #2c333d; }
+  input[type=range] { width: 100%; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  #cam { width: 100%; border-radius: 6px; display: none; }
+  .mut { color: var(--mut); font-size: 12px; }
+  a { color: #7fa8ff; }
+  @media (max-width: 720px) { body { flex-direction: column; } aside { width: 100%; } #stage { height: 60vh; flex: none; } }
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="c"></canvas></div>
+<aside>
+  <section>
+    <h3>Pemutaran</h3>
+    <div class="row"><button id="play">▶ Putar</button><button id="pause" class="sec">❚❚ Jeda</button><span id="time" class="mut"></span></div>
+    <input id="seek" type="range" min="0" max="1" step="0.01" value="0">
+  </section>
+  <section>
+    <h3>Video di meja</h3>
+    <label>Lebar (cm) <input id="cw" type="range" min="5" max="200" step="0.5"></label>
+    <label>Rotasi <input id="ca" type="range" min="-180" max="180" step="1"></label>
+    <div class="row"><button id="fit" class="sec">Pas ke meja</button>
+      <label><input id="grid" type="checkbox"> Grid kalibrasi</label></div>
+  </section>
+  <section>
+    <h3>Terpilih: <span id="selname">–</span></h3>
+    <label>Rotasi <input id="sa" type="range" min="-180" max="180" step="1"></label>
+    <div class="mut">Geser perangkat atau video di kanvas. Scroll atau tombol Q/E untuk memutar.</div>
+  </section>
+  <section>
+    <h3>Tracking</h3>
+    <div id="trk" class="mut"></div>
+    <img id="cam" alt="camera">
+    <div class="mut"><a href="/markers" target="_blank">Cetak marker meja (ID 0–3)</a></div>
+  </section>
+</aside>
+<video id="v" src="/video" playsinline muted loop preload="auto" style="display:none"></video>
+<script src="/static/common.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const cv = $('c'), ctx = cv.getContext('2d'), video = $('v');
+let sel = null, drag = null, view = { s: 1, ox: 0, oy: 0 };
+
+SL.connect({ t: 'hello', role: 'control' }, m => { if (m.t === 'state') updatePanel(); });
+setInterval(() => SL.syncVideo(video), 200);
+
+const fmt = t => isNaN(t) ? '0:00' : `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+$('play').onclick = () => SL.send({ t: 'play' });
+$('pause').onclick = () => SL.send({ t: 'pause' });
+$('seek').oninput = e => SL.send({ t: 'seek', pos: +e.target.value });
+$('grid').onchange = e => SL.send({ t: 'grid', on: e.target.checked });
+$('cw').oninput = e => setContent({ w: +e.target.value });
+$('ca').oninput = e => setContent({ a: +e.target.value * Math.PI / 180 });
+$('sa').oninput = e => rotateSel(+e.target.value * Math.PI / 180, true);
+$('fit').onclick = () => {
+  const T = SL.state.table, ar = video.videoWidth ? video.videoHeight / video.videoWidth : 9 / 16;
+  setContent({ x: T.w / 2, y: T.h / 2, a: 0, w: Math.min(T.w, T.h / ar) });
+};
+video.onloadedmetadata = () => { $('seek').max = video.duration; };
+
+function setContent(p) { Object.assign(SL.state.content, p); SL.send({ t: 'content', ...p }); }
+function setPose(d, p) { Object.assign(d, p); SL.send({ t: 'pose', id: d.id, ...p }); }
+
+function updatePanel() {
+  const S = SL.state;
+  if (document.activeElement !== $('cw')) $('cw').value = S.content.w;
+  if (document.activeElement !== $('ca')) $('ca').value = S.content.a * 180 / Math.PI;
+  $('grid').checked = S.grid;
+  const n = Object.keys(S.devices).length;
+  $('trk').textContent = S.tracking
+    ? `Kamera aktif · meja ${S.calibrated ? 'terkalibrasi ✓' : 'BELUM terkalibrasi (tampilkan marker 0–3)'} · ${n} layar`
+    : `Mode manual (tanpa kamera) · ${n} layar terhubung`;
+  if (S.tracking && $('cam').style.display !== 'block') { $('cam').src = '/cam.mjpg'; $('cam').style.display = 'block'; }
+  const d = selObj();
+  $('selname').textContent = !sel ? '–' : sel === 'content' ? 'video' : 'layar #' + sel;
+  if (d && document.activeElement !== $('sa')) $('sa').value = (sel === 'content' ? d.a : d.a) * 180 / Math.PI;
+}
+setInterval(() => {
+  if (!video.duration) return;
+  $('time').textContent = `${fmt(video.currentTime)} / ${fmt(video.duration)}`;
+  if (document.activeElement !== $('seek')) $('seek').value = video.currentTime;
+}, 250);
+
+function selObj() {
+  const S = SL.state; if (!S || !sel) return null;
+  return sel === 'content' ? S.content : S.devices[sel] || null;
+}
+function rotateSel(a, absolute) {
+  const d = selObj(); if (!d) return;
+  const na = absolute ? a : d.a + a;
+  sel === 'content' ? setContent({ a: na }) : setPose(d, { a: na });
+}
+
+// --- geometry helpers ---
+const toTable = e => { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left - view.ox) / view.s, y: (e.clientY - r.top - view.oy) / view.s }; };
+function local(p, o) { const dx = p.x - o.x, dy = p.y - o.y, c = Math.cos(-o.a), s = Math.sin(-o.a); return { x: dx * c - dy * s, y: dx * s + dy * c }; }
+const devSize = d => ({ w: (d.vw || 390) * d.cmPerPx, h: (d.vh || 844) * d.cmPerPx });
+const contentSize = c => ({ w: c.w, h: c.w * (video.videoWidth ? video.videoHeight / video.videoWidth : 9 / 16) });
+function hit(p) {
+  const S = SL.state;
+  for (const d of Object.values(S.devices).reverse()) {
+    const l = local(p, d), z = devSize(d);
+    if (Math.abs(l.x) < z.w / 2 && Math.abs(l.y) < z.h / 2) return String(d.id);
+  }
+  const l = local(p, S.content), z = contentSize(S.content);
+  if (Math.abs(l.x) < z.w / 2 && Math.abs(l.y) < z.h / 2) return 'content';
+  return null;
+}
+
+cv.addEventListener('pointerdown', e => {
+  if (!SL.state) return;
+  const p = toTable(e); sel = hit(p); updatePanel();
+  const o = selObj(); if (!o) return;
+  drag = { dx: o.x - p.x, dy: o.y - p.y }; cv.setPointerCapture(e.pointerId);
+});
+cv.addEventListener('pointermove', e => {
+  if (!drag) return;
+  const p = toTable(e), o = selObj(); if (!o) return;
+  const np = { x: p.x + drag.dx, y: p.y + drag.dy };
+  sel === 'content' ? setContent(np) : setPose(o, np);
+});
+cv.addEventListener('pointerup', () => { drag = null; });
+cv.addEventListener('wheel', e => { e.preventDefault(); if (!sel) sel = hit(toTable(e)); rotateSel(Math.sign(e.deltaY) * 0.05); updatePanel(); }, { passive: false });
+addEventListener('keydown', e => { if (e.key === 'q') rotateSel(-0.05); if (e.key === 'e') rotateSel(0.05); });
+
+function frame() {
+  requestAnimationFrame(frame);
+  const S = SL.state, dpr = devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+  if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = W * dpr; cv.height = H * dpr; }
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = '#0b0d10'; ctx.fillRect(0, 0, cv.width, cv.height);
+  if (!S) return;
+  const T = S.table, pad = 30;
+  view.s = Math.min((W - pad * 2) / T.w, (H - pad * 2) / T.h);
+  view.ox = (W - T.w * view.s) / 2; view.oy = (H - T.h * view.s) / 2;
+  const px = 1 / view.s;
+  ctx.setTransform(dpr * view.s, 0, 0, dpr * view.s, dpr * view.ox, dpr * view.oy);
+
+  ctx.fillStyle = '#2a2420'; ctx.fillRect(0, 0, T.w, T.h);               // table surface
+  ctx.globalAlpha = 0.35; SL.drawTable(ctx, video, px); ctx.globalAlpha = 1; // whole video, dimmed
+
+  for (const d of Object.values(S.devices)) {
+    const z = devSize(d), tracked = Date.now() - d.tracked < 1500;
+    ctx.save(); ctx.translate(d.x, d.y); ctx.rotate(d.a);
+    ctx.beginPath(); ctx.rect(-z.w / 2, -z.h / 2, z.w, z.h); ctx.clip();
+    ctx.rotate(-d.a); ctx.translate(-d.x, -d.y); SL.drawTable(ctx, video, px);  // what that screen shows
+    ctx.restore();
+    ctx.save(); ctx.translate(d.x, d.y); ctx.rotate(d.a);
+    ctx.lineWidth = px * (sel === String(d.id) ? 3 : 1.5);
+    ctx.strokeStyle = sel === String(d.id) ? '#3a7bff' : tracked ? '#3ddc84' : '#ccc';
+    ctx.strokeRect(-z.w / 2, -z.h / 2, z.w, z.h);
+    ctx.fillStyle = '#fff'; ctx.font = `bold ${14 * px}px system-ui`; ctx.textAlign = 'center';
+    ctx.fillText('#' + d.id + (d.markerOn ? ' ◼' : ''), 0, -z.h / 2 + 18 * px);
+    ctx.restore();
+  }
+  if (sel === 'content') {
+    const c = S.content, z = contentSize(c);
+    ctx.save(); ctx.translate(c.x, c.y); ctx.rotate(c.a); ctx.setLineDash([6 * px, 4 * px]);
+    ctx.lineWidth = 2 * px; ctx.strokeStyle = '#3a7bff'; ctx.strokeRect(-z.w / 2, -z.h / 2, z.w, z.h); ctx.restore();
+  }
+}
+frame();
+</script>
+</body>
+</html>
